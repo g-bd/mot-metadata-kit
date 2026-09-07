@@ -15,7 +15,9 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Optional
 
-from .scan import FIELD_DIRT_HE, check_name, field_dirt, field_key, name_style, norm_field, read_column_counts, read_column_values, scan_folder
+from .scan import (FIELD_DIRT_HE, MAX_TYPE_EXAMPLES, check_name, field_dirt, field_key, has_hebrew,
+                   is_question_mark_run, looks_like_cp1252_mojibake, name_style, norm_field,
+                   read_column_counts, read_column_values, scan_folder)
 from .spec import Spec
 from .io import as_lines, split_keywords, to_text
 
@@ -64,6 +66,28 @@ def _norm_token(v: Any) -> str:
     t = _DASHES_RE.sub("-", t)
     t = re.sub(r"\s*-\s*", " - ", t).strip()
     return t.casefold()
+
+
+def _non_numeric_evidence(c: dict, spec: Spec) -> tuple[Optional[int], list]:
+    """What a scanned column holds that a numeric Type cannot explain (KP-R4).
+
+    Returns (how many of the sampled cells, up to five of them). `0` means the column
+    contradicts nothing: every non-numeric value in it is a token the format accepts
+    (`Null`, `not_recorded` - `spec.accepted_tokens`), or the column carries no value at
+    all. `None` = the scanner kept no count for this kind of file, only examples.
+
+    A documented token is a category, not a type error - the same reading `value_undocumented`
+    already gives it. With no profile there are no accepted tokens and nothing is ignored.
+    """
+    vals = c.get("non_numeric_values")
+    if isinstance(vals, dict):
+        bad = {v: n for v, n in vals.items() if not spec.is_accepted_token(v)}
+        return sum(bad.values()), list(bad)[:MAX_TYPE_EXAMPLES]
+    samples = [x for x in (c.get("text_examples") or [c.get("text_example") or c.get("example")]) if x]
+    if not samples:
+        return 0, []                       # nothing in the column to judge
+    bad = [s for s in samples if not spec.is_accepted_token(s)]
+    return (0, []) if not bad else (c.get("n_non_numeric_sampled"), bad[:MAX_TYPE_EXAMPLES])
 
 
 def _is_free_text_key(item: dict) -> bool:
@@ -591,13 +615,15 @@ def check_fields(fl: dict, e: Optional[dict], spec: Spec, fx: Findings, where: s
             t = to_text(f.get("Type")).lower().replace("(key)", "")
             inf = (c.get("inferred_type") or "").lower()
             if t in ("integer", "real", "number") and inf == "text":
-                n_bad = c.get("n_non_numeric_sampled")
-                samples = c.get("text_examples") or [x for x in (c.get("text_example") or c.get("example"),) if x]
-                fx.add("warning", "fields", f"{where}.{f.get('Name')}", "type_implausible",
-                       f"'{f.get('Name')}' מוגדר {f.get('Type')} אך בקובץ יש ערכים לא מספריים"
-                       + (f" ({n_bad} מתוך {c.get('n_sampled')} במדגם)" if n_bad else ""),
-                       "דוגמאות: " + ", ".join(str(s) for s in samples[:5]) if samples else "",
-                       "עדכן את ה-Type או תקן את הערכים – הערכים נקראו כטקסט ולא הומרו")
+                # KP-R4: a value the format documents as an accepted token (`not_recorded`)
+                # is a category, not a non-numeric value - it does not make the Type wrong.
+                n_bad, samples = _non_numeric_evidence(c, spec)
+                if n_bad != 0:
+                    fx.add("warning", "fields", f"{where}.{f.get('Name')}", "type_implausible",
+                           f"'{f.get('Name')}' מוגדר {f.get('Type')} אך בקובץ יש ערכים לא מספריים"
+                           + (f" ({n_bad} מתוך {c.get('n_sampled')} במדגם)" if n_bad else ""),
+                           "דוגמאות: " + ", ".join(str(s) for s in samples[:MAX_TYPE_EXAMPLES]) if samples else "",
+                           "עדכן את ה-Type או תקן את הערכים – הערכים נקראו כטקסט ולא הומרו")
             elif t in ("date", "time", "datetime") and inf in ("integer", "real"):
                 fx.add("warning", "fields", f"{where}.{f.get('Name')}", "type_implausible", f"'{f.get('Name')}' מוגדר {f.get('Type')} אך הערכים בקובץ מספריים (דוגמה: {c.get('example')})")
             elif t == "text" and inf in ("integer", "real") and c.get("candidate_values") and not f.get("Values"):
@@ -638,8 +664,7 @@ def check_values_vs_data(meta: dict, spec: Spec, scan: Optional[dict], fx: Findi
         m = KEY_RE.match(to_text(raw).replace("​", ""))
         if m:
             in_keys |= {(_norm_file(m.group(1)), field_key(m.group(2))), (_norm_file(m.group(3)), field_key(m.group(4)))}
-    accepted = {to_text(v.get("value")).lower()
-                for v in ((spec.profile.get("accepted_tokens") or {}).get("values") or [])}
+    accepted = spec.accepted_token_set
     for fl in meta.get("Files", []):
         name = to_text(fl.get("File name"))
         e = idx.get(_norm_file(name)) or idx.get(_norm_file(Path(name).name))
@@ -668,7 +693,7 @@ def check_values_vs_data(meta: dict, spec: Spec, scan: Optional[dict], fx: Findi
             actual_set = {str(a) for a in actual}
             # tokens the profile accepts everywhere (Null, not_recorded) are a category,
             # not an undocumented code (FP-11)
-            undocumented = sorted(a for a in actual_set - documented if a.strip().lower() not in accepted)
+            undocumented = sorted(a for a in actual_set - documented if " ".join(a.split()).casefold() not in accepted)
             unused = sorted(documented - actual_set)
             if undocumented:
                 fx.add("error", "fields", f"{name}.{fname}", "value_undocumented",
@@ -910,6 +935,111 @@ def check_zone_codes(meta: dict, spec: Spec, folder: Optional[Path], fx: Finding
                "ודא שהשכבה המצורפת היא זו שלפיה קודדו המוצאים והיעדים, או תעד את הקודים החורגים ב-Values")
 
 
+# --------------------------------------------------------------------------- encoding integrity (KP-R3)
+def _iter_scanned_tables(scan):
+    """(display name, entry) for every table the scan read - on disk, inside a zip, per sheet."""
+    if not scan:
+        return
+    for e in scan.get("files") or []:
+        if e.get("role") == "sidecar":
+            continue
+        if e.get("fields"):
+            yield e["name"], e
+        for sh in (e.get("sheets") or []):
+            if sh.get("fields") and sh.get("fields") is not e.get("fields"):
+                yield f"{e['name']}#{sh.get('sheet')}", sh
+        for member, ie in (e.get("inner") or {}).items():
+            if isinstance(ie, dict) and ie.get("fields"):
+                yield f"{e['name']}/{member}", ie
+
+
+def check_text_integrity(spec: Spec, scan: Optional[dict], fx: Findings) -> None:
+    """KP-R3 - the owner's rule (06/09/2026): Hebrew is never written as question marks.
+
+    This is NOT a check on the content of the data (hard rule 1): it does not ask whether a
+    value is right, it asks whether the value ARRIVED. A cell holding `????` or U+FFFD carries
+    no information at all - the characters were destroyed by the codec that wrote or read the
+    file, and no reader, and no later correction, can get them back. That is a completeness-of-
+    documentation failure, and the only moment anyone can still fix it is before the package
+    ships.
+
+    One finding per COLUMN, with the count and up to three examples, taken from the sample the
+    scanner already profiled - the kit reports how many values are gone, never what they were
+    supposed to say.
+    """
+    cfg = spec.encoding_integrity
+    cap = int(cfg.get("max_examples", 3))
+    for name, e in _iter_scanned_tables(scan):
+        for c in (e.get("fields") or []):
+            where = f"{name}.{c.get('name')}"
+            n_lost = int(c.get("n_question_mark_values") or 0)
+            if n_lost:
+                ex = ", ".join(str(x) for x in (c.get("question_mark_examples") or [])[:cap])
+                fx.add(spec.encoding_severity("text_lost_as_question_marks"), "fields", where,
+                       "text_lost_as_question_marks",
+                       f"{n_lost} ערכים בעמודה '{c.get('name')}' הם סימני שאלה או תו החלפה – הטקסט אבד בכתיבה או בקריאה",
+                       (f"דוגמאות: {ex} · " if ex else "") + f"מתוך {c.get('n_sampled') or '?'} שורות שנדגמו",
+                       "הפק את הקובץ מחדש מהמקור בקידוד UTF-8 (או Windows-1255 עם הצהרה) – ערך שנכתב כסימני שאלה אינו ניתן לשחזור")
+            n_moji = int(c.get("n_mojibake_values") or 0)
+            if n_moji:
+                ex = ", ".join(str(x) for x in (c.get("mojibake_examples") or [])[:cap])
+                fx.add(spec.encoding_severity("hebrew_mojibake"), "fields", where, "hebrew_mojibake",
+                       f"{n_moji} ערכים בעמודה '{c.get('name')}' נראים כעברית שנקראה בקידוד שגוי (mojibake)",
+                       (f"דוגמאות: {ex} · " if ex else "") + f"מתוך {c.get('n_sampled') or '?'} שורות שנדגמו",
+                       "קרא את הקובץ בקידוד שבו נכתב (UTF-8 / Windows-1255) והצהר עליו – ב-.cpg לשכבה, ב-Data encoding לקובץ")
+
+
+def _metadata_strings(meta: dict):
+    """(where, text) for every string a human wrote into the metadata document."""
+    for k, v in meta.items():
+        if k.startswith("_") or k == "Files":
+            continue
+        lines = as_lines(v)
+        for i, ln in enumerate(lines):
+            yield (k if len(lines) == 1 else f"{k}[{i + 1}]"), ln
+    for fl in meta.get("Files") or []:
+        fname = to_text(fl.get("File name")) or "?"
+        for k, v in fl.items():
+            if k.startswith("_") or k == "File fields":
+                continue
+            lines = as_lines(v)
+            for i, ln in enumerate(lines):
+                yield (f"{fname}.{k}" if len(lines) == 1 else f"{fname}.{k}[{i + 1}]"), ln
+        for fld in fl.get("File fields") or []:
+            n = to_text(fld.get("Name")) or "?"
+            for k in ("Name", "Description", "Comments"):
+                for ln in as_lines(fld.get(k)):
+                    yield f"{fname}.{n}.{k}", ln
+            for v in (fld.get("Values") or []):
+                for k in ("label", "comment"):
+                    for ln in as_lines(v.get(k)):
+                        yield f"{fname}.{n}.Values[{to_text(v.get('value'))}].{k}", ln
+
+
+def check_metadata_encoding(meta: dict, spec: Spec, fx: Findings) -> None:
+    """KP-R3 - the metadata document's own text is never question marks either.
+
+    A description that reads `????` documents nothing, and it is worse than an empty cell:
+    a report prints it as though somebody had answered. A lone `?` stays where it belongs -
+    the dictionary already rejects it as a placeholder (`value_placeholder`) - so only text
+    that was actually destroyed is reported here.
+    """
+    cfg = spec.encoding_integrity
+    sev = spec.encoding_severity("metadata_value_question_marks")
+    for where, txt in _metadata_strings(meta):
+        section = "header" if "." not in where else "fields"
+        if is_question_mark_run(txt, cfg):
+            fx.add(sev, section, where, "metadata_value_question_marks",
+                   f"הערך של '{where}' נכתב כסימני שאלה: '{txt[:60]}'",
+                   "טקסט שנכתב כסימני שאלה או כתו החלפה (U+FFFD) אבד – הוא אינו תיעוד",
+                   "כתוב את הערך מחדש ב-metadata-config.json ושמור בקידוד UTF-8, ואז build --force")
+        elif looks_like_cp1252_mojibake(txt, cfg):
+            fx.add(sev, section, where, "metadata_value_question_marks",
+                   f"הערך של '{where}' נראה כעברית שנקראה בקידוד שגוי: '{txt[:60]}'",
+                   "כך נראית עברית שנכתבה ב-UTF-8 ונקראה כ-Windows-1252, או להפך",
+                   "פתח את קובץ המקור בקידוד הנכון וכתוב את הערך מחדש")
+
+
 # --------------------------------------------------------------------------- keys
 def check_keys(meta: dict, fx: Findings) -> None:
     files = {_norm_file(to_text(f.get("File name"))): f for f in meta.get("Files", [])}
@@ -972,6 +1102,37 @@ def _relaxed_required(meta: dict, spec: Spec, present: dict) -> tuple[set, str]:
     return relaxed, why
 
 
+def _check_declared_files(meta: dict, spec: Spec, present: dict, fx: Findings) -> None:
+    """Files the FORMAT has the metadata declare by name, checked in both directions.
+
+    `profile.json -> declared_files`: a block key (rail: `Modules`) whose rows name the
+    optional files this package carries. A file that is there and not declared, and a file
+    that is declared and not there, are both a contradiction inside the metadata - which is
+    exactly what a metadata validator may say. Nothing is read from the data: the row of a
+    station saying it collected a module is the format's OTHER declaration, and comparing it
+    with the module's rows would be judging the data.
+    """
+    block = spec.profile.get("declared_files") or {}
+    key, names = block.get("key"), list(block.get("files") or [])
+    if not key or not names:
+        return
+    rows = [to_text(r) for r in as_lines(meta.get(key)) if to_text(r).strip() and not _is_todo(r)]
+    txt = " | ".join(rows).lower()
+    sev = block.get("severity", "error")
+    for name in names:
+        token = re.escape(Path(name).stem.lower())
+        declared = bool(re.search(r"(?<![a-z0-9_])" + token + r"(?![a-z0-9_])", txt))
+        shipped = name in present
+        if declared and not shipped:
+            fx.add(sev, "profile", name, "declared_file_missing",
+                   f"{key} מצהיר על '{Path(name).stem}' אך {name} אינו בחבילה",
+                   block.get("note", ""), f"הוסף את {name} לחבילה, או הסר את השורה מ-{key}")
+        elif shipped and not declared:
+            fx.add(sev, "profile", name, "file_not_declared",
+                   f"{name} נמצא בחבילה אך אינו מוצהר ב-{key} ({block.get('he', key)})",
+                   block.get("note", ""), f"הוסף שורה '{Path(name).stem} — <תחנות>' ל-{key}")
+
+
 def check_profile(meta: dict, spec: Spec, scan: Optional[dict], fx: Findings) -> None:
     if not spec.profile:
         return
@@ -983,6 +1144,7 @@ def check_profile(meta: dict, spec: Spec, scan: Optional[dict], fx: Findings) ->
         if ef:
             present.setdefault(ef["name"], []).append(n)
     relaxed, relax_why = _relaxed_required(meta, spec, present)
+    _check_declared_files(meta, spec, present, fx)
     # KP-10: propose Survey completeness and say why. NEVER write it - the author confirms
     # what the survey is; the kit only points out what the folder looks like.
     comp_item = next((it for it in spec.survey if it["key"] == "Survey completeness"), None)
@@ -1134,6 +1296,8 @@ def validate(meta: dict, spec: Spec, folder: Optional[Path] = None, scan: Option
     for item in meta.get("_meta", {}).get("auto_from_docs", []):
         fx.add("info", "fields", item.split(":")[0], "desc_from_docs", f"תיאור נלקח אוטומטית מהתיעוד – יש לאמת: {item}", "", "ערוך ב-metadata-config.json אם אינו מדויק")
     check_files(meta, spec, scan, fx)
+    check_metadata_encoding(meta, spec, fx)
+    check_text_integrity(spec, scan, fx)
     check_keys(meta, fx)
     check_file_names(meta, fx)
     check_profile(meta, spec, scan, fx)
@@ -1162,8 +1326,19 @@ def validate(meta: dict, spec: Spec, folder: Optional[Path] = None, scan: Option
         "counts": fx.counts(), "buckets": fx.buckets(), "todo": list(meta.get("_meta", {}).get("todo") or []),
         "n_files_described": len(meta.get("Files", [])), "n_fields_described": sum(len(f.get("File fields", [])) for f in meta.get("Files", [])),
         "dataset_kind": kind, "survey_block_checked": include_survey, "profile": spec.profile_name,
-        "guideline_version": spec.base["spec"]["version"], "folder": str(folder) if folder else None,
-        "metadata_source": meta.get("_meta", {}).get("source_file"),
+        # The folder's NAME, not the machine path (see build.py `_meta.folder`):
+        # `findings.json` is handed to a third party beside the package, and a
+        # drive letter in it publishes the producer's disk.
+        "guideline_version": spec.base["spec"]["version"],
+        "folder": Path(folder).name if folder else None,
+        # The file's NAME, for the same reason `folder` above is a name: this
+        # summary is written into `findings.json`, which travels beside the
+        # package.
+        "metadata_source": (
+            Path(meta.get("_meta", {}).get("source_file")).name
+            if meta.get("_meta", {}).get("source_file")
+            else None
+        ),
         "deep_checks": sorted(deep),
     }
     return fx, summary

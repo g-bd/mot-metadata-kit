@@ -48,6 +48,37 @@
     ],
     "use_instead": "ארצי / מטרופולין X / שם יישוב / מחוז; לשטחי יהודה ושומרון – 'אזור יהודה ושומרון'"
   },
+  "encoding_integrity": {
+    "note": "שלמות הקידוד: מלל בעברית לעולם אינו נכתב כסימני שאלה. זו בדיקת תיעוד – האם הטקסט הגיע שלם – ולא בדיקה של נכונות הנתונים. ערך טקסט שכולו סימני שאלה (רצף באורך question_mark_min_run ומעלה), או שסימני השאלה הם לפחות question_mark_ratio מתוויו, או שהוא מכיל את תו ההחלפה U+FFFD – הוא ערך שאבד ואינו ניתן לשחזור, ומדווח text_lost_as_question_marks ברמת העמודה (מספר הערכים ודוגמה, לא תוכן). עמודה שהעברית בה נראית כמו קריאת UTF-8 בקידוד Windows-1252 (רצפים כמו '×', 'Ã', 'â€'), או כמו קריאת cp1255 ב-Windows-1252 (רצף של mojibake_latin1_min_run אותיות לטיניות מוטעמות ברצף) מדווחת hebrew_mojibake. ערך מחרוזת במסמך המטא-דאטה עצמו (כותרת, בלוקים, תיאורי קבצים, תיאורי שדות) שנפגע כך מדווח metadata_value_question_marks. פלט של הערכה עצמה (json/xlsx/csv/html) שאינו חוזר כפי שנכתב הוא באג של הערכה – output_roundtrip_failed; PDF שממנו לא ניתן לחלץ את העברית של הכותרת מדווח pdf_hebrew_not_rendered. פרופיל רשאי להוסיף סמן, לא להסיר.",
+    "source": "בקשת הבעלים, 06/09/2026: \"שיוודא שאין בעייה של כתיבת סימני שאלה במקום מלל בעברית\"",
+    "question_mark_min_run": 2,
+    "question_mark_ratio": 0.5,
+    "replacement_char": "�",
+    "mojibake_leads": [
+      "×",
+      "Ã",
+      "Â",
+      "â"
+    ],
+    "mojibake_min_hits": 2,
+    "mojibake_latin1_min_run": 4,
+    "max_examples": 3,
+    "roundtrip_sample": 20,
+    "roundtrip_formats": [
+      "json",
+      "xlsx",
+      "csv",
+      "html"
+    ],
+    "pdf_font_hint": "הגופן שבו הודפס ה-PDF אינו מכיל אותיות עבריות, או שהדפדפן הדפיס מסמך ללא meta charset. הרץ setup, ודא שהמערכת כוללת גופן עברי (Arial / Noto Sans Hebrew), והפק שוב; אפשר לוותר על האימות עם --allow-unverified-pdf",
+    "severities": {
+      "text_lost_as_question_marks": "error",
+      "hebrew_mojibake": "error",
+      "metadata_value_question_marks": "error",
+      "output_roundtrip_failed": "error",
+      "pdf_hebrew_not_rendered": "warning"
+    }
+  },
   "field_types": [
     "Text",
     "Text(key)",

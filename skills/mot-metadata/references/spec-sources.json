@@ -38,7 +38,16 @@
         "trips -> obad/obod key: 3.8 prints trip_id, 3.6 and Tables 10-11 name trip_index (FP-14) - the kit accepts both",
         "a per-file synonym table for real-world column names (KP-1) - vocabulary, not typography"
       ]
-    }
+    },
+    {
+      "profile": "base",
+      "kit_version": "0.7.4",
+      "date": "06/09/2026",
+      "spec_version_unchanged": "1.3",
+      "source": "בקשת הבעלים, 06/09/2026: \"שיוודא שאין בעייה של כתיבת סימני שאלה במקום מלל בעברית\" (KP-R3, rail-viewer/docs/KIT-PROPOSALS.md)",
+      "what": "The נוהל text is unchanged. spec.json gains `encoding_integrity`: Hebrew is never written as question marks, checked at the three points where it silently happens. (1) Data files: a text column whose values are a run of `?` (or where `?` is at least half the characters), or which holds U+FFFD, is reported once per column as text_lost_as_question_marks (error) with the count and up to three examples; a column whose Hebrew is Windows-1252 mojibake - UTF-8 read as cp1252 (the lead pairs the dictionary lists) or cp1255 read as cp1252 (a run of accented Latin letters) - is hebrew_mojibake (error). The counts come from the sample the scanner already profiles, so the check costs nothing extra, and it counts values, never judges their content. (2) The metadata document's own strings - header, blocks, file descriptions, field descriptions, labels - get the same test as metadata_value_question_marks (error); a lone `?` stays a value_placeholder, as before. (3) The kit's own outputs: every json/xlsx/csv/html it writes is read back and each Hebrew string of the document must return character for character (output_roundtrip_failed, error, build exits 2 - this is the kit's own bug, never the user's), and a PDF's first two pages must yield the title's Hebrew to pypdf (pdf_hebrew_not_rendered, warning, build exits non-zero unless --allow-unverified-pdf; without pypdf the check is skipped with an info, never assumed to pass). The console fallback stays and a line that had to be degraded is prefixed '[console: degraded encoding] '. Thresholds, mojibake markers and wording are data; a profile may tighten a threshold or add a marker, never remove one, and the severities belong to the base dictionary alone."
+    },
+    {"profile": "base", "kit_version": "0.7.4", "date": "06/09/2026", "spec_version_unchanged": "1.3", "source": "rail-viewer/docs/KIT-PROPOSALS.md KP-R4 (חבילת רכבת איילון 2021-2025, 06/09/2026)", "what": "The נוהל text and the profile texts are unchanged. A token a FORMAT accepts as a cell value (`accepted_tokens` - `Null`, `not_recorded`) is a category of its own, so no check that classifies cell values may read it as data. `Spec.accepted_tokens` / `accepted_token_set` / `is_accepted_token` expose the merged list (base + profile; the base נוהל names none, a profile may add and never remove), and `type_implausible` now ignores an accepted token exactly as `value_undocumented` already did - a numeric column that holds the format's token beside its codes is not mistyped. The scanner reports which values are not numeric (`non_numeric_values`, value -> row count, up to 20 distinct) so the judgement is exact: real free text beside a token is still a warning, with the tokens left out of the count and the examples. A column with no value at all no longer contradicts its declared type. With no profile nothing is ignored."}
   ],
   "sources": [
     {"id": "guideline", "name": "נוהל הכנה ותיעוד קבצי מידע לתכנון תחבורה", "version": "1.3", "date": "15/05/2024",

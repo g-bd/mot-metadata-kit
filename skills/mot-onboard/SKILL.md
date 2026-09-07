@@ -73,6 +73,11 @@ travelled to — whichever way round the format writes the key line.
   fields, which no answer in `metadata-config.json` could reach. The kit tries the `.cpg`, then
   UTF-8, then the DBF's own code page, then Windows-1255, and reports which it used
   (`dbf_encoding_assumed`). Shipping a `.cpg` is still the real fix.
+- **Hebrew is never written as question marks.** A column of `????`, a value with U+FFFD, or Hebrew
+  that arrived as cp1252 mojibake is an error (`text_lost_as_question_marks` / `hebrew_mojibake`),
+  and so is the same damage in the metadata document (`metadata_value_question_marks`). An OB
+  delivery written through a cp1255 export is where this bites: the value is unrecoverable, so the
+  answer is a re-export, never a hand-typed guess.
 - **CBS statistical-areas field descriptions ship with the profile** (`references/cbs-fields.json`,
   the CBS's own wording) so a package that carries the standard layer can reach 0 errors.
 - **`Survey completeness` is proposed, never written** — `חלקי` when `obod.csv` is absent, `מלא`

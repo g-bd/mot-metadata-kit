@@ -173,6 +173,21 @@ a metadata file that already carries it — at the dataset level or per file —
 `spatial_coverage_wording`. The terms are data (`spec.json → spatial_coverage_wording`, substring
 match, case- and invisible-character-insensitive); a profile may add one, never remove one.
 
+**Encoding integrity (KP-R3, the owner 06/09/2026).** Hebrew text is never written as question
+marks. This is a completeness-of-documentation rule, not a rule about data content: a cell holding
+`????` or U+FFFD carries no information at all, and no reader and no later correction can bring it
+back. A text column whose values are a run of `?` (or where `?` is at least half the characters),
+or which holds U+FFFD, is reported once per column as `text_lost_as_question_marks` (error) with a
+count and examples; a column whose Hebrew is cp1252 mojibake is `hebrew_mojibake` (error); the same
+damage in the metadata document's own values is `metadata_value_question_marks` (error). Every
+output the kit writes is read back before it is offered: json / xlsx / csv / html must return every
+Hebrew string character for character (`output_roundtrip_failed`, exit 2 - the kit's bug, never the
+user's), and a PDF's first pages must yield the title's Hebrew to a text extractor
+(`pdf_hebrew_not_rendered`, warning; `build --allow-unverified-pdf` accepts it, still reported).
+The thresholds, the mojibake markers and the wording are data (`spec.json → encoding_integrity`);
+a profile may tighten a threshold or add a marker, never remove one, and it may not change a
+severity.
+
 **Sizes.** `Size` and `File size` are "MB" in the נוהל's wording. The kit writes the unit that keeps the
 number readable **and** the exact byte count — `612 B (612 bytes)`, `6.3 KB (6,451 bytes)`,
 `16.5 MB (17,268,557 bytes)`, `2.04 GB (…)` — so a small lookup table is no longer `0.0` and the size

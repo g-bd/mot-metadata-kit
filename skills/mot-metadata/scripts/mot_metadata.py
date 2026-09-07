@@ -5,7 +5,7 @@ Usage (run from anywhere; the script finds its own references/ and profiles):
 
   python mot_metadata.py scan      <folder> [--recursive] [--out scan.json]
   python mot_metadata.py init      <folder> [--profile onboard|sensors]        # write metadata-config.json template
-  python mot_metadata.py build     <folder> [--profile P] [--config FILE] [--name NAME] [--formats json,xlsx,pdf,csv] [--force]
+  python mot_metadata.py build     <folder> [--profile P] [--config FILE] [--name NAME] [--formats json,xlsx,pdf,csv] [--force] [--allow-unverified-pdf]
   python mot_metadata.py validate  <folder> [--metadata FILE] [--profile P] [--kind survey|monitoring|...] [--deep values,temporal,joins,zones] [--report FILE] [--findings FILE]
   python mot_metadata.py render    <metadata.json|xlsx> [--profile P] [--pdf FILE] [--html FILE]
   python mot_metadata.py package   <folder> [--metadata FILE] [--out FILE.zip]   # build the הפצה zip + checklist
@@ -25,7 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 REQUIRED = {"openpyxl": "openpyxl>=3.1"}
-OPTIONAL = {"shapefile": "pyshp>=2.3", "pyproj": "pyproj>=3.4", "xlrd": "xlrd>=2.0", "pyarrow": "pyarrow>=14"}
+OPTIONAL = {"shapefile": "pyshp>=2.3", "pyproj": "pyproj>=3.4", "xlrd": "xlrd>=2.0", "pyarrow": "pyarrow>=14",
+            "pypdf": "pypdf>=4.0"}
 
 
 def ensure_deps(install_optional: bool = False, quiet: bool = True) -> list[str]:
@@ -62,7 +63,8 @@ if "--no-auto-install" not in sys.argv:
 from motmeta.spec import Spec, BUILTIN_PROFILES, SKILL_DIR  # noqa: E402
 from motmeta.scan import scan_folder  # noqa: E402
 from motmeta.build import build_metadata, default_config, load_config, suggested_metadata_basename, config_from_metadata, CONFIG_NAME  # noqa: E402
-from motmeta.io import read_metadata, write_json, write_xlsx, write_csv, metadata_html, html_to_pdf  # noqa: E402
+from motmeta.io import (read_metadata, write_json, write_xlsx, write_csv, metadata_html, html_to_pdf,
+                        assert_hebrew_roundtrip, hebrew_sample_strings)  # noqa: E402
 from motmeta.validate import validate  # noqa: E402
 from motmeta.report import render_report, write_findings_json  # noqa: E402
 
@@ -70,10 +72,54 @@ META_RE = re.compile(r"metadata", re.I)
 
 
 def _out(msg: str) -> None:
+    """Print a line, and SAY SO when the console could not carry it (KP-R3).
+
+    The fallback stays - a cp1255 console must not crash the run - but a line that came out
+    with `?` in it is marked, so nobody ever copies a degraded line back into a config file
+    believing it is the value the kit computed.
+    """
     try:
         print(msg)
     except UnicodeEncodeError:  # Windows consoles with cp1255/cp437
-        print(msg.encode("utf-8", "replace").decode("ascii", "replace"))
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        degraded = ("[console: degraded encoding] " + msg).encode(enc, "replace").decode(enc, "replace")
+        try:
+            print(degraded)
+        except Exception:
+            print(degraded.encode("ascii", "replace").decode("ascii", "replace"))
+
+
+def _ensure_pypdf(allowed: bool) -> bool:
+    """pypdf reads the PDF back to prove its Hebrew is really there. Optional: without it the
+    PDF check is skipped with an `info`, never guessed at."""
+    import importlib
+    try:
+        importlib.import_module("pypdf")
+        return True
+    except ImportError:
+        pass
+    if not allowed:
+        return False
+    return bool(ensure_deps_for({"pypdf": OPTIONAL["pypdf"]}))
+
+
+def ensure_deps_for(wanted: dict) -> list[str]:
+    import importlib
+    import subprocess
+    installed = []
+    for mod, req in wanted.items():
+        try:
+            importlib.import_module(mod)
+            continue
+        except ImportError:
+            pass
+        cmd = [sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", req]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            r = subprocess.run(cmd + ["--user"], capture_output=True, text=True)
+        if r.returncode == 0:
+            installed.append(req)
+    return installed
 
 
 def find_metadata_file(folder: Path) -> Path | None:
@@ -141,8 +187,23 @@ def cmd_init(a) -> int:
     return 0
 
 
-def _write_outputs(meta, spec, out_dir: Path, base: str, formats: list[str], include_survey: bool, force: bool) -> dict:
+def _write_outputs(meta, spec, out_dir: Path, base: str, formats: list[str], include_survey: bool, force: bool,
+                   verify: bool = True) -> tuple[dict, list[dict]]:
+    """Write every requested format and, KP-R3, read each one back to prove its Hebrew survived."""
     written = {}
+    checks: list[dict] = []
+    samples = hebrew_sample_strings(meta, int(spec.encoding_integrity.get("roundtrip_sample", 20)))
+
+    def verify_one(path: Path):
+        if not verify:
+            return
+        chk = assert_hebrew_roundtrip(path, samples, spec.encoding_integrity)
+        checks.append(chk)
+        if chk.get("skipped"):
+            _out(f"  check {path.name}: skipped - {chk['skipped']}")
+        elif not chk["ok"]:
+            _out(f"  check {path.name}: HEBREW DID NOT SURVIVE - {chk['detail']}")
+
     for fmt in formats:
         p = out_dir / f"{base}.{fmt}"
         if p.exists() and not force:
@@ -165,13 +226,54 @@ def _write_outputs(meta, spec, out_dir: Path, base: str, formats: list[str], inc
                     hp.write_text(h, encoding="utf-8")
                     _out(f"  pdf: {msg}; wrote {hp.name} instead")
                     written["html"] = str(hp)
+                    verify_one(hp)
                     continue
         else:
             _out(f"  unknown format {fmt}")
             continue
         written[fmt] = str(p)
         _out(f"  wrote {p}")
-    return written
+        verify_one(p)
+    return written, checks
+
+
+def _roundtrip_findings(checks: list[dict], fx, spec, allow_unverified_pdf: bool) -> int:
+    """Turn the round-trip results into findings, and say what the exit code must be (KP-R3).
+
+    A json/xlsx/csv/html output that does not come back as it was written is the KIT's bug, not
+    the user's data - it exits 2, the code the CLI already uses for "the tool failed". A PDF
+    whose Hebrew cannot be extracted is a rendering problem (a font without Hebrew glyphs, a
+    browser that printed nothing): it is reported and it still fails the build, because a PDF
+    of question marks is what a ministry reviewer would open - unless the operator has said
+    --allow-unverified-pdf.
+    """
+    ei = spec.encoding_integrity
+    worst = 0
+    for chk in checks:
+        name = Path(chk["path"]).name
+        if chk.get("skipped"):
+            fx.add("info", "outputs", name, "output_roundtrip_skipped",
+                   f"העברית בקובץ '{name}' לא אומתה", chk["skipped"],
+                   "התקן pypdf (pip install pypdf) כדי לאמת שהעברית ב-PDF באמת נדפסה")
+            continue
+        if chk["ok"]:
+            continue
+        if chk["format"] == "pdf":
+            fx.add(spec.encoding_severity("pdf_hebrew_not_rendered", "warning"), "outputs", name,
+                   "pdf_hebrew_not_rendered",
+                   f"לא ניתן לחלץ את העברית מ-'{name}' – ייתכן שה-PDF הודפס ללא גופן עברי",
+                   chk.get("detail", ""), ei.get("pdf_font_hint", ""))
+            if not allow_unverified_pdf:
+                worst = max(worst, 1)
+        else:
+            missing = ", ".join(chk.get("missing") or [])
+            fx.add(spec.encoding_severity("output_roundtrip_failed"), "outputs", name,
+                   "output_roundtrip_failed",
+                   f"הפלט '{name}' לא חזר כפי שנכתב – העברית שבו נפגעה",
+                   (chk.get("detail", "") + (f" · חסר: {missing}" if missing else "")).strip(),
+                   "זהו באג של הערכה עצמה, לא של הנתונים – אין להפיץ את הקובץ; דווח עליו")
+            worst = 2
+    return worst
 
 
 def cmd_build(a) -> int:
@@ -211,10 +313,15 @@ def cmd_build(a) -> int:
     formats = [f.strip() for f in a.formats.split(",") if f.strip()]
     include_survey = meta["_meta"]["survey_block"]
     _out(f"profile={spec.profile_name} kind={meta['_meta']['dataset_kind']} files={len(meta['Files'])} todo={len(meta['_meta']['todo'])}")
-    written = _write_outputs(meta, spec, out_dir, base, formats, include_survey, a.force)
+    if "pdf" in formats:
+        _ensure_pypdf(not a.no_auto_install)
+    written, checks = _write_outputs(meta, spec, out_dir, base, formats, include_survey, a.force)
     # always validate what we just built
     deep = {x.strip() for x in (a.deep or "").split(",") if x.strip()}
     fx, summary = validate(meta, spec, folder, scan, deep=deep)
+    rt = _roundtrip_findings(checks, fx, spec, a.allow_unverified_pdf)
+    summary["counts"], summary["buckets"] = fx.counts(), fx.buckets()
+    summary["output_checks"] = checks
     summary["metadata_source"] = written.get("json") or written.get("xlsx") or "(in-memory)"
     rep = out_dir / (a.report or "metadata-report.html")
     rep.write_text(render_report(fx, summary, meta, scan, spec.describe()), encoding="utf-8")
@@ -227,7 +334,12 @@ def cmd_build(a) -> int:
             _out(f"  - {t}")
         if len(meta["_meta"]["todo"]) > 40:
             _out(f"  ... and {len(meta['_meta']['todo']) - 40} more (see report)")
-    return 1 if c["error"] else 0
+    if rt == 2:
+        _out("an output the kit wrote did not come back with its Hebrew intact - see findings.json (output_roundtrip_failed)")
+        return 2
+    if rt:
+        _out("the PDF's Hebrew could not be verified - re-run with --allow-unverified-pdf to accept it anyway")
+    return 1 if (c["error"] or rt) else 0
 
 
 def cmd_validate(a) -> int:
@@ -276,10 +388,25 @@ def cmd_render(a) -> int:
         hp = Path(a.html) if a.html else base.with_suffix(".html")
         hp.write_text(h, encoding="utf-8")
         _out(f"wrote {hp}")
+    samples = hebrew_sample_strings(meta, int(spec.encoding_integrity.get("roundtrip_sample", 20)))
+    if a.html or not a.pdf:
+        chk = assert_hebrew_roundtrip(hp, samples, spec.encoding_integrity)
+        if not chk["ok"]:
+            _out(f"html: HEBREW DID NOT SURVIVE - {chk['detail']}")
+            return 2
     if a.pdf:
+        _ensure_pypdf(not a.no_auto_install)
         ok, msg = html_to_pdf(h, Path(a.pdf))
         _out(f"pdf: {msg}")
-        return 0 if ok else 2
+        if not ok:
+            return 2
+        chk = assert_hebrew_roundtrip(Path(a.pdf), samples, spec.encoding_integrity)
+        if chk.get("skipped"):
+            _out(f"pdf check skipped: {chk['skipped']}")
+        elif not chk["ok"]:
+            _out(f"pdf: the Hebrew could not be verified - {chk['detail']}")
+            _out(spec.encoding_integrity.get("pdf_font_hint", ""))
+            return 0 if a.allow_unverified_pdf else 1
     return 0
 
 
@@ -432,10 +559,14 @@ def main(argv=None) -> int:
     p = sub.add_parser("init"); p.add_argument("folder"); p.add_argument("--profile", choices=list(BUILTIN_PROFILES)); p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_init)
     p = sub.add_parser("build"); p.add_argument("folder"); p.add_argument("--profile"); p.add_argument("--config"); p.add_argument("--name"); p.add_argument("--basename")
     p.add_argument("--from", dest="from_metadata", help="seed values from an existing metadata xlsx/json and regenerate a corrected document")
-    p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones (or all)"); p.add_argument("--out-dir"); p.add_argument("--formats", default="json,xlsx,pdf"); p.add_argument("--report"); p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_build)
+    p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones (or all)"); p.add_argument("--out-dir"); p.add_argument("--formats", default="json,xlsx,pdf"); p.add_argument("--report"); p.add_argument("--force", action="store_true")
+    p.add_argument("--allow-unverified-pdf", action="store_true", help="accept a PDF whose Hebrew could not be extracted (KP-R3) - it is still reported")
+    p.set_defaults(fn=cmd_build)
     p = sub.add_parser("validate"); p.add_argument("folder"); p.add_argument("--metadata"); p.add_argument("--profile"); p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones (or all)"); p.add_argument("--report"); p.add_argument("--findings")
     p.add_argument("--out-dir"); p.add_argument("--no-folder", action="store_true", help="check the document only, do not compare with files"); p.set_defaults(fn=cmd_validate)
-    p = sub.add_parser("render"); p.add_argument("metadata"); p.add_argument("--profile"); p.add_argument("--pdf"); p.add_argument("--html"); p.set_defaults(fn=cmd_render)
+    p = sub.add_parser("render"); p.add_argument("metadata"); p.add_argument("--profile"); p.add_argument("--pdf"); p.add_argument("--html")
+    p.add_argument("--allow-unverified-pdf", action="store_true", help="accept a PDF whose Hebrew could not be extracted (KP-R3)")
+    p.set_defaults(fn=cmd_render)
     p = sub.add_parser("check-spec"); p.add_argument("--online", action="store_true"); p.set_defaults(fn=cmd_check_spec)
     p = sub.add_parser("package", help="zip the dataset (Files list + metadata + related documents) as Dataset file, with a checklist")
     p.add_argument("folder"); p.add_argument("--metadata"); p.add_argument("--profile"); p.add_argument("--out"); p.set_defaults(fn=cmd_package)

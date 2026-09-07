@@ -31,6 +31,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
+from .scan import ENCODING_INTEGRITY, has_hebrew, is_question_mark_run, looks_like_cp1252_mojibake
 from .spec import Spec, lookup_key
 
 FIELD_COLS = ["name", "type", "description", "comments", "value", "label", "comment"]
@@ -390,6 +391,168 @@ def metadata_html(meta: dict, spec: Spec, include_survey: bool, title: Optional[
 <h2>כותרת</h2><table class='kv'>{''.join(rows)}</table>
 <h2>מבנה הנתונים לכל קובץ</h2>{''.join(files_html)}
 </body></html>"""
+
+
+# --------------------------------------------------------------------------- Hebrew round-trip (KP-R3)
+HEBREW_ONLY_RE = re.compile(r"[^\u0590-\u05ff\ufb1d-\ufb4f]+")
+QRUN_RE = re.compile(r"[?\uff1f]{3,}")
+
+
+def hebrew_sample_strings(meta: dict, limit: int = 20) -> list[str]:
+    """Up to *limit* Hebrew strings of this document, in the order a reader meets them.
+
+    Title first, then the description lines, then the file descriptions and the first field
+    descriptions - the strings whose survival proves the whole document survived. Short
+    fragments are skipped: a two-letter word can match by accident.
+    """
+    out: list[str] = []
+
+    def take(v):
+        for ln in as_lines(v):
+            t = " ".join(to_text(ln).split())
+            if len(t) >= 4 and has_hebrew(t) and t not in out:
+                out.append(t)
+
+    take(meta.get("Title"))
+    take(meta.get("Description"))
+    for k in ("Publisher", "Spatial coverage", "Statistical population", "Survey method"):
+        take(meta.get(k))
+    for fl in meta.get("Files") or []:
+        take(fl.get("File description"))
+        for fld in (fl.get("File fields") or [])[:5]:
+            take(fld.get("Description"))
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
+def _hebrew_letters(text: str) -> str:
+    return HEBREW_ONLY_RE.sub("", str(text or ""))
+
+
+def _json_strings(node) -> list[str]:
+    """Every string a parsed JSON document holds - keys and values, depth first."""
+    out: list[str] = []
+    if isinstance(node, str):
+        out.append(node)
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            out.append(str(k))
+            out.extend(_json_strings(v))
+    elif isinstance(node, (list, tuple)):
+        for v in node:
+            out.extend(_json_strings(v))
+    return out
+
+
+def _read_back(path: Path) -> tuple[str, str]:
+    """(format, all the text the file holds), read exactly the way the kit wrote it."""
+    ext = path.suffix.lower().lstrip(".")
+    if ext == "json":
+        txt = path.read_text(encoding="utf-8")
+        doc = json.loads(txt)                 # it must still parse
+        # The VALUES, not the serialisation. JSON escapes a double quote inside
+        # a string as `\"`, so the raw text of `מק"ט תחנת הרכבת` reads
+        # `מק\"ט תחנת הרכבת` and a sample string that contains a gershayim can
+        # never be found in it - which said "the Hebrew did not survive" about a
+        # file whose Hebrew is perfect. `מק"ט` is the commonest abbreviation in
+        # this corpus, so the bug fired on almost every real document. Reading
+        # the parsed values is also what the xlsx branch below already does.
+        return "json", "\n".join(_json_strings(doc))
+    if ext == "csv":
+        return "csv", path.read_text(encoding="utf-8-sig")
+    if ext in ("html", "htm"):
+        return "html", path.read_text(encoding="utf-8")
+    if ext in ("xlsx", "xlsm"):
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        parts: list[str] = []
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(values_only=True):
+                for cell in row:
+                    if isinstance(cell, str):
+                        parts.append(cell)
+        wb.close()
+        return "xlsx", "\n".join(parts)
+    raise ValueError(f"no round-trip reader for {path.suffix}")
+
+
+def pdf_page_text(path: Path, pages: int = 2) -> str:
+    """The text pypdf can extract from the first *pages* pages. Raises ImportError without pypdf."""
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    out = []
+    for page in reader.pages[:pages]:
+        try:
+            out.append(page.extract_text() or "")
+        except Exception:
+            out.append("")
+    return "\n".join(out)
+
+
+def assert_hebrew_roundtrip(path, sample_strings, cfg: Optional[dict] = None) -> dict:
+    """KP-R3: read an output the kit just wrote and prove its Hebrew survived the writer.
+
+    json / xlsx / csv / html are read back exactly and every sample string must be there,
+    character for character - these formats have no excuse, and a miss is the KIT's own bug
+    (`output_roundtrip_failed`), never the user's data.
+
+    A PDF is different: the text layer is produced by the browser's font, letters can come back
+    in visual order, and a page break can move a string off page 1 - so the PDF test is the
+    narrow one the failure mode deserves. The first page must contain Hebrew LETTERS at all,
+    the title's letters must be among them (in either direction), and there must be no run of
+    question marks where the Hebrew should be. A PDF that prints `????` fails all three.
+
+    Returns a dict, never raises: {ok, path, format, checked, missing, question_marks, skipped}.
+    """
+    cfg = cfg or ENCODING_INTEGRITY
+    path = Path(path)
+    res = {"ok": True, "path": str(path), "format": path.suffix.lower().lstrip("."),
+           "checked": 0, "missing": [], "question_marks": 0, "skipped": "", "detail": ""}
+    samples = [s for s in (sample_strings or []) if has_hebrew(s)]
+    if not path.exists():
+        res.update(ok=False, detail="the file was not written")
+        return res
+    if res["format"] == "pdf":
+        try:
+            text = pdf_page_text(path)
+        except ImportError:
+            res["skipped"] = "pypdf is not installed - the PDF's Hebrew was not verified"
+            return res
+        except Exception as e:                      # a reader problem is not a verdict on the file
+            res["skipped"] = f"the PDF could not be read for verification: {e}"
+            return res
+        res["question_marks"] = len(QRUN_RE.findall(text))
+        if not samples:
+            res["skipped"] = "the metadata has no Hebrew to verify"
+            return res
+        res["checked"] = 1
+        letters = _hebrew_letters(text)
+        want = _hebrew_letters(samples[0])
+        if not letters:
+            res.update(ok=False, detail="no Hebrew letter could be extracted from the first pages")
+        elif want and want not in letters and want[::-1] not in letters:
+            res.update(ok=False, missing=[samples[0]], detail="the title's Hebrew is not in the extracted text")
+        elif res["question_marks"]:
+            res.update(ok=False, detail=f"{res['question_marks']} runs of '?' in the extracted text")
+        return res
+    try:
+        fmt, text = _read_back(path)
+    except Exception as e:
+        res.update(ok=False, detail=f"the file could not be read back: {e}")
+        return res
+    res["format"] = fmt
+    if fmt == "html" and "charset" not in text[:1024].lower():
+        res.update(ok=False, detail="no <meta charset> in the first 1024 bytes - a browser will guess the codec")
+        return res
+    res["question_marks"] = len(QRUN_RE.findall(text))
+    res["checked"] = len(samples)
+    res["missing"] = [x for x in samples if x not in text][:5]
+    if res["missing"]:
+        res.update(ok=False, detail=f"{len(res['missing'])} Hebrew string(s) did not come back unchanged")
+    elif is_question_mark_run(text, cfg) or looks_like_cp1252_mojibake(text, cfg):
+        res.update(ok=False, detail="the file that came back is question marks / mojibake")
+    return res
 
 
 def find_browsers() -> list[str]:

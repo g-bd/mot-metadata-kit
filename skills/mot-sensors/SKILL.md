@@ -30,6 +30,11 @@ python ../mot-metadata/scripts/mot_metadata.py validate <folder> --profile senso
   update `references/profile.json` (`expected_files[*].fields[*].Name`).
 - Dataset kind = monitoring (not a survey → no survey block).
 
+- **Hebrew is never written as question marks.** A `????` or mojibake column in a monthly package
+  is an error (`text_lost_as_question_marks` / `hebrew_mojibake`), as is the same damage in the
+  metadata (`metadata_value_question_marks`); the kit also reads back every output it writes to
+  prove the Hebrew survived.
+
 ## Intake questions (only these are usually needed)
 
 > `Spatial coverage` follows the base rule (mot-metadata): ארצי / official administrative names

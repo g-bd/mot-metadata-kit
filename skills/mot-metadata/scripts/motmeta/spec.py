@@ -131,6 +131,40 @@ class Spec:
         return merged
 
     @property
+    def accepted_tokens(self) -> dict:
+        """Tokens a format allows as the VALUE of a data cell, beside the survey's own
+        categories (`Null`, `not_recorded`, ...). They are a category of their own, not a
+        missing value and not an encoding accident, so no check that classifies cell values
+        may read one as data: neither an undocumented code (`value_undocumented`) nor a
+        non-numeric value in a numeric column (`type_implausible`, KP-R4).
+
+        The base נוהל names none - it does not legislate cell contents - so with no profile
+        the list is empty and a stray word in an Integer column is still reported. A profile
+        may add tokens; like every other dictionary entry it may not remove one.
+        """
+        base = self.base.get("accepted_tokens") or {}
+        prof = self.profile.get("accepted_tokens") or {}
+        out: dict[str, Any] = {"note": prof.get("note") or base.get("note", ""),
+                               "source": prof.get("source") or base.get("source", ""), "values": []}
+        seen: set[str] = set()
+        for v in list(base.get("values") or []) + list(prof.get("values") or []):
+            item = v if isinstance(v, dict) else {"value": v}
+            key = " ".join(str(item.get("value", "")).split()).casefold()
+            if key and key not in seen:
+                seen.add(key)
+                out["values"].append(dict(item))
+        return out
+
+    @property
+    def accepted_token_set(self) -> set[str]:
+        """`accepted_tokens` as one normalised set, for comparing against a cell value."""
+        return {" ".join(str(v.get("value", "")).split()).casefold() for v in self.accepted_tokens["values"]}
+
+    def is_accepted_token(self, value: Any) -> bool:
+        """True when a cell value IS one of the format's accepted tokens."""
+        return " ".join(str(value if value is not None else "").split()).casefold() in self.accepted_token_set
+
+    @property
     def spatial_wording(self) -> dict:
         """The owner's rule on Spatial coverage wording (03/09/2026): the terms the kit never
         writes and flags wherever it finds them, and what to write instead. A profile may
@@ -163,6 +197,51 @@ class Spec:
                 if t in txt:
                     return t
         return None
+
+    @property
+    def encoding_integrity(self) -> dict:
+        """KP-R3: how the kit decides that Hebrew text was lost on its way to disk.
+
+        Encoding integrity is a DOCUMENTATION question, not a data-content one: `????` in a
+        cell is not a wrong value, it is a value that never arrived, and nothing downstream
+        can recover it. The thresholds, the mojibake markers and the Hebrew wording are
+        dictionary entries (`spec.json -> encoding_integrity`); a profile may add a marker or
+        tighten a threshold, it can never remove one - a format does not get to decide that
+        losing Hebrew is acceptable.
+        """
+        base = self.base.get("encoding_integrity") or {}
+        prof = self.profile.get("encoding_integrity") or {}
+        out: dict[str, Any] = {
+            "note": prof.get("note") or base.get("note", ""),
+            "source": prof.get("source") or base.get("source", ""),
+            "pdf_font_hint": prof.get("pdf_font_hint") or base.get("pdf_font_hint", ""),
+            "replacement_char": base.get("replacement_char", "�"),
+        }
+        # a profile may only make the check STRICTER
+        out["question_mark_min_run"] = min(int(base.get("question_mark_min_run", 2)),
+                                           int(prof.get("question_mark_min_run", base.get("question_mark_min_run", 2))))
+        out["question_mark_ratio"] = min(float(base.get("question_mark_ratio", 0.5)),
+                                         float(prof.get("question_mark_ratio", base.get("question_mark_ratio", 0.5))))
+        out["mojibake_min_hits"] = min(int(base.get("mojibake_min_hits", 2)),
+                                       int(prof.get("mojibake_min_hits", base.get("mojibake_min_hits", 2))))
+        out["mojibake_latin1_min_run"] = min(int(base.get("mojibake_latin1_min_run", 4)),
+                                             int(prof.get("mojibake_latin1_min_run", base.get("mojibake_latin1_min_run", 4))))
+        out["max_examples"] = int(prof.get("max_examples") or base.get("max_examples", 3))
+        out["roundtrip_sample"] = int(prof.get("roundtrip_sample") or base.get("roundtrip_sample", 20))
+        out["roundtrip_formats"] = list(prof.get("roundtrip_formats") or base.get("roundtrip_formats") or [])
+        seen, leads = set(), []
+        for t in list(base.get("mojibake_leads") or []) + list(prof.get("mojibake_leads") or []):
+            if t and t not in seen:
+                seen.add(t)
+                leads.append(str(t))
+        out["mojibake_leads"] = leads
+        # severities are the BASE dictionary's alone: a profile may not decide that Hebrew
+        # arriving as `?` is merely a warning in its own format (hard rule 6).
+        out["severities"] = dict(base.get("severities") or {})
+        return out
+
+    def encoding_severity(self, code: str, default: str = "error") -> str:
+        return str(self.encoding_integrity.get("severities", {}).get(code) or default)
 
     @property
     def expected_files(self) -> list[dict]:

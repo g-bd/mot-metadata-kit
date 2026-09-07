@@ -68,6 +68,10 @@ MIN_COLS_FOR_HEADER_TEST = 3      # below this a "header" is too small to judge
 #: was 80 % of a full-tree run). Override with MOTMETA_ZIP_MAX_MB.
 NESTED_ZIP_MAX_MB = int(os.environ.get("MOTMETA_ZIP_MAX_MB", "100"))
 MAX_TYPE_EXAMPLES = 5
+#: KP-R4: distinct non-numeric values kept per column, so a checker can tell WHICH values are
+#: not numeric - a token the format documents (`not_recorded`) reads differently from free text.
+#: A column with more kinds of text than this holds prose, and no token list would explain it.
+NON_NUMERIC_DISTINCT_CAP = 20
 
 
 def strip_invisible(text: str) -> str:
@@ -120,6 +124,132 @@ def field_dirt(name: str) -> list[str]:
         out.append("space_around_underscore")
     if "  " in stripped:
         out.append("double_space")
+    return out
+
+
+# --------------------------------------------------------------------------- encoding integrity (KP-R3)
+#: The mechanics of "Hebrew arrived as question marks". The DICTIONARY's copy of these numbers
+#: lives in `references/spec.json -> encoding_integrity` and is what the validator reports with
+#: (a profile may tighten it); the values here are the same, and are what the scanner uses when
+#: it runs on its own - `scan` is a describing tool and never loads a Spec. `test_v074.py`
+#: asserts the two copies agree, so they cannot drift apart.
+ENCODING_INTEGRITY = {
+    "question_mark_min_run": 2,
+    "question_mark_ratio": 0.5,
+    "replacement_char": "�",
+    "mojibake_leads": ["×", "Ã", "Â", "â"],   # × Ã Â â
+    "mojibake_min_hits": 2,
+    "mojibake_latin1_min_run": 4,
+    "max_examples": 3,
+}
+REPLACEMENT_CHAR = "�"
+_QMARKS = "?？"                       # ASCII and full-width question mark
+_QRUN_RE = re.compile(r"^[?？]+$")
+HEBREW_RE = re.compile("[֐-׿יִ-ﭏ]")
+
+
+def _is_mojibake_tail(ch: str) -> bool:
+    """What the SECOND byte of a UTF-8 Hebrew letter (0xD7 0x90..0xAA) turns into when the
+    file is read as Windows-1252: some non-ASCII character that is not itself Hebrew."""
+    o = ord(ch)
+    return o > 127 and not (0x0590 <= o <= 0x05FF or 0xFB1D <= o <= 0xFB4F)
+
+
+def has_hebrew(s: Any) -> bool:
+    """Does this text carry a Hebrew letter at all?"""
+    return bool(HEBREW_RE.search(str(s or "")))
+
+
+def question_mark_ratio(s: Any) -> float:
+    """Share of the non-space characters of *s* that are question marks (0.0 for empty text).
+
+    Counting, not judging: a value that is mostly `?` is a value whose characters did not
+    survive the writer's codec, whatever it was supposed to say.
+    """
+    txt = "".join(str(s or "").split())
+    if not txt:
+        return 0.0
+    return sum(1 for ch in txt if ch in _QMARKS) / len(txt)
+
+
+def is_question_mark_run(s: Any, cfg: Optional[dict] = None) -> bool:
+    """Is this value UNRECOVERABLE text - a run of `?`, or mostly `?`, or U+FFFD?
+
+    `?` on its own is a placeholder answer, not lost text (the dictionary already rejects it
+    as `value_placeholder`), so a single `?` does not count here; `??` and up do.
+    """
+    c = cfg or ENCODING_INTEGRITY
+    txt = str(s or "").strip()
+    if not txt:
+        return False
+    if c.get("replacement_char", REPLACEMENT_CHAR) in txt:
+        return True
+    if _QRUN_RE.match(txt) and len(txt) >= int(c.get("question_mark_min_run", 2)):
+        return True
+    if len(txt) >= int(c.get("question_mark_min_run", 2)) and question_mark_ratio(txt) >= float(c.get("question_mark_ratio", 0.5)):
+        return True
+    return False
+
+
+def looks_like_cp1252_mojibake(s: Any, cfg: Optional[dict] = None) -> bool:
+    """Is this text Hebrew UTF-8 that was READ as Windows-1252?
+
+    `שלום` written UTF-8 is D7 A9 D7 9C D7 95 D7 9D; read as cp1252 every leading D7 shows as
+    `×` and every trailing byte as another Latin-1 character - `×©×œ×•×` - so the tell is a
+    LEAD character from the dictionary's list immediately followed by another non-ASCII one.
+    Two such pairs are required, so `3 × 4` and a lone `Ã` in a French name are not mojibake.
+    """
+    c = cfg or ENCODING_INTEGRITY
+    txt = str(s or "")
+    leads = set(c.get("mojibake_leads") or ENCODING_INTEGRITY["mojibake_leads"])
+    hits = 0
+    for i, ch in enumerate(txt[:-1]):
+        if ch in leads and _is_mojibake_tail(txt[i + 1]):
+            hits += 1
+    if hits >= int(c.get("mojibake_min_hits", 2)):
+        return True
+    # The other direction: cp1255 Hebrew (bytes 0xE0-0xFA) READ as Windows-1252 / Latin-1
+    # becomes a run of accented Latin letters - `shalom` arrives as `ùìåí`. Four in a row is
+    # a word that no Latin language writes, and one or two are left alone on purpose.
+    run, longest = 0, 0
+    for ch in txt:
+        if 0x00E0 <= ord(ch) <= 0x00FA:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    return longest >= int(c.get("mojibake_latin1_min_run", 4))
+
+
+def text_integrity(values: Iterable[Any], cfg: Optional[dict] = None) -> dict:
+    """Count (never judge) the values of one column that did not survive their encoding.
+
+    Returns {} for a clean column. Runs over the sample the profiler already collected, so it
+    costs one pass over values that are in memory anyway.
+    """
+    c = cfg or ENCODING_INTEGRITY
+    cap = int(c.get("max_examples", 3))
+    lost, moji = [], []
+    n_lost = n_moji = 0
+    for v in values:
+        txt = str(v or "").strip()
+        if not txt:
+            continue
+        if is_question_mark_run(txt, c):
+            n_lost += 1
+            if len(lost) < cap:
+                lost.append(txt[:60])
+        elif looks_like_cp1252_mojibake(txt, c):
+            n_moji += 1
+            if len(moji) < cap:
+                moji.append(txt[:60])
+    out: dict[str, Any] = {}
+    if n_lost:
+        out["n_question_mark_values"] = n_lost
+        out["question_mark_examples"] = lost
+    if n_moji:
+        out["n_mojibake_values"] = n_moji
+        out["mojibake_examples"] = moji
     return out
 
 
@@ -286,6 +416,10 @@ class TableProfiler:
                 "unique_in_sample": (d is not None and len(d) == self.n - self.nulls[i] and self.n > 1) or (d is None and len(set(nonnull)) == len(nonnull) and len(nonnull) > 1),
                 "example": nonnull[0] if nonnull else None,
             }
+            # KP-R3: how many of the sampled values did not survive their encoding. Counting
+            # only - the scanner says "12 values in this column are `????`", never what they
+            # were supposed to say. Runs over the sample already in memory.
+            col.update(text_integrity(nonnull))
             if mtype == "Text":
                 non_numeric = [v for v in nonnull if not _REAL_RE.match(v)]
                 col["text_example"] = non_numeric[0] if non_numeric else None
@@ -294,6 +428,12 @@ class TableProfiler:
                 if non_numeric:
                     col["n_non_numeric_sampled"] = len(non_numeric)
                     col["text_examples"] = non_numeric[:MAX_TYPE_EXAMPLES]
+                    # KP-R4: the non-numeric values themselves, with their row counts. The
+                    # scanner still does not know what a token means - it only reports what
+                    # is there; the spec decides which of them are accepted (validate.py).
+                    nn = Counter(non_numeric)
+                    if len(nn) <= NON_NUMERIC_DISTINCT_CAP:
+                        col["non_numeric_values"] = dict(nn.most_common())
             if d is not None and 0 < len(d) <= DISTINCT_CAP:
                 col["distinct_values"] = sorted(d)
             if mtype in ("Date", "DateTime") and nonnull:

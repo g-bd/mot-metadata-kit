@@ -153,7 +153,19 @@ def _expected_fields(ef: Optional[dict], spec: Spec) -> dict[str, dict]:
         flds = like.get("fields") if like else None
     if not flds:
         flds = ef.get("fields_example_stat_2022", [])
-    return {f["Name"].lower(): f for f in flds}
+    out = {f["Name"].lower(): f for f in flds}
+    if ef.get("dbf_names") == "truncated":
+        # A format may ask for a layer in shapefile form AND print field names longer than the
+        # 10 characters a DBF can hold (נוהל 5.7). The name the file can carry is then the
+        # format's own name cut to 10 - so the dictionary is keyed by that spelling. Only a
+        # PROFILE may say this about a file; nothing is guessed and no name is invented.
+        aliased: dict[str, dict] = {k: v for k, v in out.items() if len(k) <= 10}
+        for k, v in out.items():
+            if len(k) <= 10:
+                continue
+            aliased.setdefault(k[:10], v)     # the first field claiming a spelling keeps it
+        out = aliased
+    return out
 
 
 def _field_entry(col: dict, cfg_field: dict, exp: Optional[dict], hint: Optional[dict] = None,
@@ -403,7 +415,13 @@ def build_metadata(folder: str | Path, spec: Spec, config: Optional[dict] = None
         "guideline_version": spec.base["spec"]["version"], "metadata_version": spec.base["spec"]["metadata_version"],
         "profile": spec.profile_name, "profile_version": (spec.profile.get("spec") or {}).get("version"),
         "dataset_kind": kind, "survey_block": include_survey, "generated": _dt.datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "folder": str(folder), "todo": todo, "auto_keys": auto_keys, "auto_from_docs": auto_docs,
+        # The folder's NAME, never the machine path it sat on. This block is
+        # written into `<name>_metadata.json`, which is a DISTRIBUTION file: it
+        # goes into the הפצה zip and up to data.gov.il, and `G:\golan\work\...`
+        # in it publishes the producer's disk to every reader. The name is the
+        # provenance a reader can use; the path is only ours. (Caught by the
+        # rail package's `no_machine_detail` guard, 06/09/2026.)
+        "folder": Path(folder).name, "todo": todo, "auto_keys": auto_keys, "auto_from_docs": auto_docs,
         "refused_wording": refused,
     }
     return meta, scan

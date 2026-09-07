@@ -153,6 +153,15 @@ their statement, not a way to close a finding.
 - Key list: syntax `a.x -> b.y`, files/fields that do not exist, duplicates, stray spaces/zero-width
   characters.
 - Profile: expected files/fields/keys of the domain format (see mot-onboard / mot-sensors).
+- **Hebrew written as question marks.** A text column whose values are `????` or U+FFFD, or whose
+  Hebrew is cp1252 mojibake, is reported per column with a count and examples
+  (`text_lost_as_question_marks` / `hebrew_mojibake`, both errors); the same check runs over the
+  metadata's own values (`metadata_value_question_marks`). Those characters are gone - nothing
+  downstream can recover them - so the fix is always to re-export from the source in UTF-8. Every
+  json/xlsx/csv/html the kit writes is read back and its Hebrew must be there character for
+  character (`output_roundtrip_failed` = the kit's own bug, exit 2), and the PDF's first pages must
+  yield the title's Hebrew to a text extractor (`pdf_hebrew_not_rendered`; `--allow-unverified-pdf`
+  accepts it anyway, still reported).
 
 ## Uploaded files instead of a folder (ChatGPT / Claude.ai / Claude Desktop)
 

@@ -40,6 +40,13 @@ python ../mot-metadata/scripts/mot_fix.py <folder> --only columns --snake-case -
 4. Hebrew column names: do not invent translations. Ask the user for the Latin names (or derive them from the domain
    format's dictionary — e.g. the OB profile's `expected_files[*].fields`) and pass them with `--column-map`.
 
+## Question marks are not a fixable defect
+
+`mot_fix` re-encodes a file whose bytes are still there (cp1255 -> UTF-8, a missing `.cpg`). It
+does NOT touch a value that already reads `????` or U+FFFD: those characters were destroyed by
+whatever wrote the file, and inventing replacements would be inventing data. When `validate`
+reports `text_lost_as_question_marks`, say so plainly and ask for a re-export from the source.
+
 ## Boundaries
 
 - Never deletes; never edits data values; never overwrites the original metadata (writes `-fixed`).

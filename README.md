@@ -106,6 +106,7 @@ python skills/mot-metadata/scripts/mot_fix.py               <תיקייה> --met
 
 CSV (UTF-8 / Windows-1255 / UTF-16 / gzip), Excel (xlsx וגם xls ישן), Parquet, Shapefile, GeoJSON, GeoPackage,
 ZIP (כולל zip בתוך zip) ו-GTFS. גודל כל קובץ נרשם ביחידה המתאימה (KB / MB / GB) ולצידה מספר הבייטים המדויק. תיעוד קיים (README / PDF / DOCX) נקרא אוטומטית ומשמש לתיאורי השדות.
+מלל בעברית לעולם אינו נכתב כסימני שאלה: עמודה או ערך מטא-דאטה שהגיעו כ-`????` או כ-mojibake מדווחים כשגיאה, וכל פלט שהערכה כותבת (json / xlsx / csv / html / PDF) נקרא בחזרה כדי לוודא שהעברית שבו שרדה.
 
 ---
 
@@ -182,6 +183,7 @@ when the package moves them into a sub-folder. **The host environment needs `pys
 CSV (UTF-8 / Windows-1255 / UTF-16 / gzip), Excel (xlsx and legacy xls), Parquet, Shapefile, GeoJSON, GeoPackage,
 ZIP (including nested zips) and GTFS. Every file size is written in the unit that fits (KB / MB / GB) with the exact byte count beside it. Existing documentation (README / PDF / DOCX) is harvested into field
 descriptions automatically.
+Hebrew is never written as question marks: a column or a metadata value that arrived as `????` or as mojibake is an error, and every output the kit writes (json / xlsx / csv / html / PDF) is read back to prove its Hebrew survived.
 
 ### Tests
 
