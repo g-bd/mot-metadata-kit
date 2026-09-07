@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Israel MoT transport-data metadata skills (נוהל הפצת מידע תחבורתי): create, validate, fix and package dataset metadata, with on-board survey and traffic-sensor profiles",
-    "version": "0.7.3"
+    "version": "0.7.4"
   },
   "plugins": [
     {
