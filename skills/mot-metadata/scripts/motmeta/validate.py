@@ -15,7 +15,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Optional
 
-from .scan import (FIELD_DIRT_HE, MAX_TYPE_EXAMPLES, check_name, field_dirt, field_key, has_hebrew,
+from .scan import (DOC_EXT, FIELD_DIRT_HE, MAX_TYPE_EXAMPLES, check_name, field_dirt, field_key, has_hebrew,
                    is_question_mark_run, looks_like_cp1252_mojibake, name_style, norm_field,
                    read_column_counts, read_column_values, scan_folder)
 from .spec import Spec
@@ -331,7 +331,8 @@ def check_files(meta: dict, spec: Spec, scan: Optional[dict], fx: Findings) -> N
     described = [to_text(f.get("File name")) for f in files]
     nl, nd = [_norm_file(x) for x in listed], [_norm_file(x) for x in described]
     for n in listed:
-        if _norm_file(n) not in nd:
+        # a document (report PDF, questionnaire...) listed in Files list needs no description block
+        if _norm_file(n) not in nd and Path(_norm_file(n)).suffix.lower() not in DOC_EXT:
             fx.add("error", "files", n, "listed_not_described", f"'{n}' מופיע ב-Files list אך אין לו בלוק תיאור ב-Files")
     for n in described:
         if _norm_file(n) not in nl:

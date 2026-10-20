@@ -2,7 +2,8 @@
 
 Raised on the Red Line LRT 2025 v2 package (20/10/2026): `RedLineLRT2025_report.pdf` sat next to the data
 and was listed in `Files list`, yet `file_not_found` said it was not in the folder — the folder index
-held data files only. The missing description block (`listed_not_described`) is still a real finding.
+held data files only. Listing a document is enough: it needs no description block under Files
+(`listed_not_described` is for data files only).
 """
 from __future__ import annotations
 
@@ -23,7 +24,15 @@ def test_listed_document_in_folder_is_not_missing(tmp_path, spec):
     (tmp_path / "survey_report.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
     codes = _codes(tmp_path, spec, ["counts.csv", "survey_report.pdf"])
     assert ("file_not_found", "survey_report.pdf") not in codes
-    assert ("listed_not_described", "survey_report.pdf") in codes
+    # listing a document is enough - it needs no description block under Files (owner, 20/10/2026)
+    assert ("listed_not_described", "survey_report.pdf") not in codes
+
+
+def test_listed_data_file_without_block_is_still_an_error(tmp_path, spec):
+    (tmp_path / "counts.csv").write_text("id,v\n1,2\n", encoding="utf-8")
+    (tmp_path / "extra.csv").write_text("id,v\n1,2\n", encoding="utf-8")
+    codes = _codes(tmp_path, spec, ["counts.csv", "extra.csv"])
+    assert ("listed_not_described", "extra.csv") in codes
 
 
 def test_listed_document_absent_is_still_missing(tmp_path, spec):
