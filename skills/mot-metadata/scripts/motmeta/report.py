@@ -10,8 +10,9 @@ from typing import Any, Optional
 SEV_HE = {"error": "שגיאה", "warning": "אזהרה", "info": "הערה"}
 SEC_HE = {"header": "כותרת (טבלה 1)", "survey": "בלוק הסקר (טבלה 2)", "files": "תיאור הקבצים (טבלה 3)", "fields": "תיאור השדות (טבלה 4)",
           "keys": "רשימת מפתחות", "naming": "כללי שמות (5.7)", "folder": "התאמה לתיקייה", "profile": "פורמט ייעודי", "spec": "גרסת הנוהל",
+          "report": "הדוח מול הקבצים (בדיקת שפיות)",
           "outputs": "פלטי הערכה (שלמות הקידוד)"}
-SEC_ORDER = ["header", "survey", "files", "fields", "keys", "folder", "naming", "profile", "outputs", "spec"]
+SEC_ORDER = ["header", "survey", "files", "fields", "keys", "folder", "naming", "profile", "report", "outputs", "spec"]
 
 
 def _e(v: Any) -> str:

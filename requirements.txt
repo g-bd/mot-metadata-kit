@@ -4,4 +4,5 @@ openpyxl>=3.1          # required: read/write metadata.xlsx and scan .xlsx data 
 pyshp>=2.3             # optional: shapefile fields / geometry / bbox
 pyproj>=3.4            # optional: CRS detection from .prj
 xlrd>=2.0              # optional: legacy .xls data files
+pypdf>=4.0             # optional: PDF Hebrew round-trip and `--deep report` (the survey report vs the files)
 # PDF rendering uses a locally installed Chromium browser (Chrome / Edge). No Python dependency.

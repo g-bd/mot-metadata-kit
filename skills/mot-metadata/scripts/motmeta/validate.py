@@ -1282,7 +1282,7 @@ def check_file_names(meta: dict, fx: Findings) -> None:
 # --------------------------------------------------------------------------- entry
 def validate(meta: dict, spec: Spec, folder: Optional[Path] = None, scan: Optional[dict] = None, dataset_kind: Optional[str] = None,
              deep: Optional[set] = None) -> tuple[Findings, dict]:
-    """deep: optional set of extra checks — {"values", "temporal", "joins"} (or {"all"})."""
+    """deep: optional set of extra checks — {"values", "temporal", "joins", "zones", "report"} (or {"all"})."""
     fx = Findings()
     if folder and scan is None:
         exclude = {"metadata-config.json", "metadata-report.html", "findings.json", "scan.json"}
@@ -1307,7 +1307,7 @@ def validate(meta: dict, spec: Spec, folder: Optional[Path] = None, scan: Option
     check_documents(meta, spec, scan, fx)
     deep = {x.lower() for x in (deep or set())}
     if "all" in deep:
-        deep |= {"values", "temporal", "joins", "zones"}
+        deep |= {"values", "temporal", "joins", "zones", "report"}
     if "values" in deep:
         check_values_vs_data(meta, spec, scan, fx)
     if "temporal" in deep:
@@ -1316,6 +1316,9 @@ def validate(meta: dict, spec: Spec, folder: Optional[Path] = None, scan: Option
         check_key_joins(meta, spec, folder, fx, scan)
     if "zones" in deep:
         check_zone_codes(meta, spec, folder, fx, scan)
+    if "report" in deep:
+        from .reportcheck import check_report_vs_data
+        check_report_vs_data(meta, folder, scan, fx)
     seen, uniq = set(), Findings()
     for f in fx:
         k = (f["severity"], f["code"], f["where"], f["msg"])
