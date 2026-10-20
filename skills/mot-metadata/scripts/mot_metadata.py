@@ -6,7 +6,7 @@ Usage (run from anywhere; the script finds its own references/ and profiles):
   python mot_metadata.py scan      <folder> [--recursive] [--out scan.json]
   python mot_metadata.py init      <folder> [--profile onboard|sensors]        # write metadata-config.json template
   python mot_metadata.py build     <folder> [--profile P] [--config FILE] [--name NAME] [--formats json,xlsx,pdf,csv] [--force] [--allow-unverified-pdf]
-  python mot_metadata.py validate  <folder> [--metadata FILE] [--profile P] [--kind survey|monitoring|...] [--deep values,temporal,joins,zones] [--report FILE] [--findings FILE]
+  python mot_metadata.py validate  <folder> [--metadata FILE] [--profile P] [--kind survey|monitoring|...] [--deep values,temporal,joins,zones,report] [--report FILE] [--findings FILE]
   python mot_metadata.py render    <metadata.json|xlsx> [--profile P] [--pdf FILE] [--html FILE]
   python mot_metadata.py package   <folder> [--metadata FILE] [--out FILE.zip]   # build the הפצה zip + checklist
   python mot_metadata.py check-spec [--online]
@@ -559,10 +559,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("init"); p.add_argument("folder"); p.add_argument("--profile", choices=list(BUILTIN_PROFILES)); p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_init)
     p = sub.add_parser("build"); p.add_argument("folder"); p.add_argument("--profile"); p.add_argument("--config"); p.add_argument("--name"); p.add_argument("--basename")
     p.add_argument("--from", dest="from_metadata", help="seed values from an existing metadata xlsx/json and regenerate a corrected document")
-    p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones (or all)"); p.add_argument("--out-dir"); p.add_argument("--formats", default="json,xlsx,pdf"); p.add_argument("--report"); p.add_argument("--force", action="store_true")
+    p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones,report (or all)"); p.add_argument("--out-dir"); p.add_argument("--formats", default="json,xlsx,pdf"); p.add_argument("--report"); p.add_argument("--force", action="store_true")
     p.add_argument("--allow-unverified-pdf", action="store_true", help="accept a PDF whose Hebrew could not be extracted (KP-R3) - it is still reported")
     p.set_defaults(fn=cmd_build)
-    p = sub.add_parser("validate"); p.add_argument("folder"); p.add_argument("--metadata"); p.add_argument("--profile"); p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones (or all)"); p.add_argument("--report"); p.add_argument("--findings")
+    p = sub.add_parser("validate"); p.add_argument("folder"); p.add_argument("--metadata"); p.add_argument("--profile"); p.add_argument("--kind"); p.add_argument("--deep", help="extra checks: values,temporal,joins,zones,report (or all)"); p.add_argument("--report"); p.add_argument("--findings")
     p.add_argument("--out-dir"); p.add_argument("--no-folder", action="store_true", help="check the document only, do not compare with files"); p.set_defaults(fn=cmd_validate)
     p = sub.add_parser("render"); p.add_argument("metadata"); p.add_argument("--profile"); p.add_argument("--pdf"); p.add_argument("--html")
     p.add_argument("--allow-unverified-pdf", action="store_true", help="accept a PDF whose Hebrew could not be extracted (KP-R3)")

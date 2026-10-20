@@ -90,6 +90,7 @@ python skills/mot-metadata/scripts/mot_fix.py               <תיקייה> --met
 
 הוסיפו `--profile onboard` או `--profile sensors` לסקרי און-בורד ולחבילות גלאים,
 ו-`--deep values,temporal,joins` לבדיקות התאמה מעמיקות בין המטא-דאטה לנתונים.
+`--deep report` משווה את דוח הסקר (PDF) לקבצים — מספר הרשומות, סכומי המשקלות ושורות הטבלאות בדוח — כבדיקת שפיות.
 
 **מדריך מלא בעברית:** `GUIDE-he.html` (התקנה, שימוש יומיומי, קריאת הדוח, עדכון גרסאות הנוהל).
 
@@ -164,7 +165,8 @@ against the guideline"*. The skill asks only what the files cannot tell it (publ
 descriptions); anything still open is written as `TODO` and listed in the report.
 
 Add `--profile onboard` / `--profile sensors` for those domains, and `--deep values,temporal,joins` for deeper
-metadata↔data consistency checks.
+metadata↔data consistency checks; `--deep report` compares the survey report PDF with the files
+(row counts, weight sums, table rows) as a sanity check.
 
 **Full Hebrew guide:** `GUIDE-he.html`.
 
