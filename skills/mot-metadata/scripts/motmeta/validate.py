@@ -340,11 +340,13 @@ def check_files(meta: dict, spec: Spec, scan: Optional[dict], fx: Findings) -> N
     for n in dup:
         fx.add("error", "files", n, "duplicate_file_block", f"'{n}' מתואר יותר מפעם אחת")
     idx = _scan_index(scan)
+    # documents/metadata files present in the folder are not data, but a Files list entry naming one is not 'missing'
+    doc_names = {Path(_norm_file(e['name'])).name for e in (scan or {}).get('files', []) if e['role'] in ('document', 'metadata', 'other')}
     if scan:
         folder_names = {_norm_file(e["name"]) for e in scan["files"] if e["role"] == "data"}
         for n in listed:
             nn = _norm_file(n)
-            if nn not in idx and Path(nn).name not in {Path(k).name for k in idx}:
+            if nn not in idx and Path(nn).name not in {Path(k).name for k in idx} | doc_names:
                 strip = lambda x: re.sub(r"[​-‏‪-‮﻿]", "", x)
                 twin = next((k for k in idx if strip(Path(k).name) == strip(Path(nn).name)), None)
                 if twin:
