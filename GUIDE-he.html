@@ -117,7 +117,7 @@
 <div class="wrap">
   <nav class="toc" aria-label="תוכן">
     <div class="t">Contents</div>
-    <a href="#what">מה בערכה</a><a href="#req">דרישות</a><a href="#install">התקנה</a><a href="#use">שימוש יומיומי</a><a href="#report">קריאת הדוח</a><a href="#not">מה הערכה לא עושה</a><a href="#spec">עדכון גרסאות</a><a href="#downloads">הורדות</a><a href="#tree">מבנה הערכה</a>
+    <a href="#what">מה בערכה</a><a href="#req">דרישות</a><a href="#install">התקנה</a><a href="#use">שימוש יומיומי</a><a href="#report">קריאת הדוח</a><a href="#not">מה הערכה לא עושה</a><a href="#spec">עדכון גרסאות</a><a href="#downloads">הורדות</a><a href="#changelog">מה חדש</a><a href="#tree">מבנה הערכה</a>
   </nav>
 
   <article>
@@ -262,8 +262,24 @@
       <div class="note">אחרי ההורדה: פורקים לתיקייה קבועה ומריצים פעם אחת <code dir="ltr">python skills/mot-metadata/scripts/mot_metadata.py setup</code>. מי שהתקין דרך Claude Code מקבל עדכונים ב-<code>/plugin update mot-metadata-kit</code>.</div>
     </section>
 
+    <section id="changelog">
+      <h2><span class="num">09 / changelog</span>מה חדש</h2>
+      <div class="tbl"><table>
+        <tr><th>גרסה</th><th>תאריך</th><th>מה השתנה</th></tr>
+        <tr><td>0.7.6</td><td>21/10/2026</td><td>יומן השינויים הזה (וגם <code>CHANGELOG.md</code>); בכותרת המדריך מופיעים מספר הגרסה המלא ותאריך השחרור.</td></tr>
+        <tr><td>0.7.5</td><td>20/10/2026</td><td><b>בדיקת הדוח מול הקבצים</b> (<code>--deep report</code>, כלולה ב-<code>--deep all</code>): מספר הרשומות וסכומי המשקלות מחופשים בדוח הסקר, וכל שורת טבלה בדוח שמתחילה בתווית של קוד מתועד מושווית לקבצים (ספירה ואחוז, ללא שקלול ובכל עמודת משקל). אי-התאמה היא אזהרה, לא שגיאה. בנוסף: מסמך (PDF, DOCX) שרשום ב-Files list אינו צריך בלוק תיאור, ואינו מדווח כחסר כשהוא בתיקייה.</td></tr>
+        <tr><td>0.7.4</td><td>07/09/2026</td><td>שמירה על העברית: טקסט שהפך לסימני שאלה או לג'יבריש בנתונים, במטא-דאטה ובפלטי הערכה; ערכים מוסכמים של הפורמט (<code>Null</code>, <code>not_recorded</code>) אינם נחשבים טעות סוג; אין נתיבים מלאים במטא-דאטה.</td></tr>
+        <tr><td>0.7.3</td><td>03/09/2026</td><td>קבצי Parquet; גודל קובץ ביחידה מתאימה ובבתים מדויקים; Spatial coverage לעולם אינו "השטחים הכבושים".</td></tr>
+        <tr><td>0.7.2</td><td>03/09/2026</td><td>מערכת קואורדינטות מוסקת מהתיחום כשקובץ ה-<code>.prj</code> חסר.</td></tr>
+        <tr><td>0.7.1</td><td>26/08/2026</td><td>ערך "לא ידוע" מתועד הוא תשובה ולא TODO; קודי האזורים של הפורמט אינם יתומים; קבצי DBF בלי קידוד מוצהר.</td></tr>
+        <tr><td>0.7.0</td><td>26/08/2026</td><td><code>--deep zones</code>, קבוצת "הפורמט אינו דורש", <code>--out-dir</code>; הרחבות לפרופיל האון-בורד.</td></tr>
+        <tr><td>0.6</td><td>24/08/2026</td><td>האתר, עמוד המשרד ובדיקת דליפות לפני פרסום.</td></tr>
+        <tr><td>0.5.0</td><td>24/08/2026</td><td>גרסה ראשונה: mot-metadata, mot-onboard, mot-sensors, mot-fix.</td></tr>
+      </table></div>
+    </section>
+
     <section id="tree">
-      <h2><span class="num">09 / layout</span>מבנה הערכה</h2>
+      <h2><span class="num">10 / layout</span>מבנה הערכה</h2>
       <div class="term"><div class="bar"><i></i><i></i><i></i></div><pre>mot-metadata-kit/
   .claude-plugin/plugin.json
   GUIDE-he.html                      <span class="c">← this guide</span>

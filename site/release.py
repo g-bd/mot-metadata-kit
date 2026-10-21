@@ -22,6 +22,8 @@ Never force-pushes, never deletes a release, and refuses to publish a version th
 from __future__ import annotations
 
 import argparse
+import datetime
+import datetime
 import io
 import json
 import re
@@ -100,7 +102,9 @@ def stamp_version(version: str) -> None:
         p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     guide = KIT / "GUIDE-he.html"
     s = guide.read_text(encoding="utf-8")
-    s = re.sub(r"(<span>v)\d+\.\d+(?:\.\d+)?(</span>)", rf"\g<1>{'.'.join(version.split('.')[:2])}\g<2>", s, count=1)
+    # the header eyebrow: full version and the release date
+    s = re.sub(r"(<span>v)\d+\.\d+(?:\.\d+)?(</span><span>)\d{2}/\d{2}/\d{4}(</span>)",
+               rf"\g<1>{version}\g<2>{datetime.date.today():%d/%m/%Y}\g<3>", s, count=1)
     s = re.sub(r"mot-metadata-kit-v\d+\.\d+\.\d+\.zip", f"mot-metadata-kit-v{version}.zip", s)
     s = re.sub(r"mot-metadata-skill-v\d+\.\d+\.\d+\.zip", f"mot-metadata-skill-v{version}.zip", s)
     guide.write_text(s, encoding="utf-8")
